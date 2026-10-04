@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Network Redesign Dashboard</title>
+<style>
+:root{--bg:#f5f7fa;--card:#fff;--ink:#10243e;--mut:#6b7a8d;--line:#e3e8ee;--as:#8da2b8;--op:#0f9d8a;--rd:#e0483e}
+@media(prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#0e1621;--card:#16212f;--ink:#e8eef5;--mut:#8fa1b5;--line:#243447;--as:#6f879f}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+.w{max-width:1280px;margin:0 auto;padding:24px 20px 40px}h1{font-size:24px;margin:0}h2{font-size:15px;margin:0 0 12px}
+.sub{color:var(--mut);margin:4px 0 18px}.g{display:grid;gap:14px}.k{grid-template-columns:repeat(4,1fr)}.two{grid-template-columns:1fr 1fr}.map{grid-template-columns:1.25fr 1fr}
+@media(max-width:900px){.k,.two,.map{grid-template-columns:1fr 1fr}.map{grid-template-columns:1fr}}@media(max-width:560px){.k,.two{grid-template-columns:1fr}}
+.c{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;min-width:0}
+.kl{color:var(--mut);font-size:12px;text-transform:uppercase;letter-spacing:.04em}.kv{font-size:26px;font-weight:700;margin-top:4px}.ks{color:var(--mut);font-size:12px;margin-top:2px}
+.good{color:var(--op)}.bad{color:var(--rd)}
+.ctl{display:flex;flex-wrap:wrap;gap:12px;align-items:end;margin-bottom:14px}.ctl label{display:flex;flex-direction:column;font-size:12px;color:var(--mut);gap:4px}
+input,button{font:inherit;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:7px 9px}input[type=number]{width:130px}
+button{cursor:pointer}button.on{background:var(--ink);color:var(--card);border-color:var(--ink)}
+.tg{display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap}svg{width:100%;height:auto;display:block}
+table{width:100%;border-collapse:collapse;font-size:13px}th{color:var(--mut);font-weight:600;text-align:left;font-size:12px;padding:6px 8px;border-bottom:1px solid var(--line)}
+td{padding:7px 8px;border-bottom:1px solid var(--line)}td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}tr.f td{background:rgba(224,72,62,.09)}
+.tag{display:inline-block;padding:1px 7px;border-radius:99px;font-size:11px;background:rgba(224,72,62,.15);color:var(--rd)}
+.lg{display:flex;gap:14px;font-size:12px;color:var(--mut);margin-top:8px;flex-wrap:wrap}.lg i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px}
+.warn{background:rgba(224,72,62,.12);color:var(--rd);padding:8px 12px;border-radius:8px;margin-bottom:12px;display:none}
+.foot{color:var(--mut);font-size:12px;margin-top:18px}.sc{overflow-x:auto}
+</style></head><body><div class="w">
+<h1>Network Redesign Dashboard</h1><div class="sub" id="sub"></div>
+<div class="c"><div class="ctl" id="ctl"></div><div class="warn" id="warn"></div>
+<div class="g k" id="kpi"></div></div>
+<div class="g map" style="margin-top:14px"><div class="c"><h2>Service routes</h2><div class="tg" id="mt"></div><svg id="map" viewBox="0 0 700 560"></svg>
+<div class="lg"><span><i style="background:var(--rd)"></i>Avoidable long route</span><span><i style="background:var(--op)"></i>Recommended route</span><span><i style="background:var(--as)"></i>Current route</span><span><i style="background:var(--ink)"></i>Plant (square), warehouse (circle)</span></div></div>
+<div class="c"><h2>Cost per period</h2><svg id="cost" viewBox="0 0 520 170"></svg><h2 style="margin-top:14px">Units by haul distance</h2><svg id="dist" viewBox="0 0 520 210"></svg></div></div>
+<div class="g two" style="margin-top:14px"><div class="c"><h2>Units shipped by location</h2><svg id="node" viewBox="0 0 560 470"></svg>
+<div class="lg"><span><i style="background:var(--as)"></i>Current</span><span><i style="background:var(--op)"></i>Optimised</span><span>Tick marks warehouse capacity</span></div></div>
+<div class="c sc"><h2>Longest avoidable routes</h2><table id="lanes"></table></div></div>
+<div class="c sc" style="margin-top:14px"><div class="ctl" style="margin:0 0 10px"><h2 style="margin:0">How each destination is served</h2><input id="q" placeholder="Search destination" style="margin-left:auto"></div><table id="dst"></table></div>
+<div class="foot">Distances are straight line (haversine) between coordinates. Destination coordinates are approximate town or state capital centres, as the workbook only holds plant and warehouse coordinates. Warehouses are not owned, so cost is variable only (handling plus freight). Sales sources are mapped to reference nodes: Lagos factory to Ota, Lagos to Lagos 1, Ikeja and Ijoko to Lagos 2, Ibadan to South West, Abuja to Central, Port Harcourt and Aba to East, Benin to South Central, Kano to North.</div>
+</div>
+<script>
+const D=__DATA__,N=D.nodes,DS=D.dest,FL=D.flows,rad=Math.PI/180;
+/*SOLVER*/
+const hav=(a,b,c,d)=>{const x=(c-a)*rad,y=(d-b)*rad,s=Math.sin(x/2)**2+Math.cos(a*rad)*Math.cos(c*rad)*Math.sin(y/2)**2;return 12742*Math.asin(Math.sqrt(s))};
+const ND=N.map(n=>DS.map(d=>hav(n.la,n.lo,d[1],d[2]))),NN=N.map(a=>N.map(b=>hav(a.la,a.lo,b.la,b.lo)));
+const P=[],W=[];N.forEach((n,i)=>(n.t==='P'?P:W).push(i));
+function MCF(n){this.n=n;this.to=[];this.cap=[];this.cost=[];this.nx=[];this.hd=new Array(n).fill(-1)}
+MCF.prototype.add=function(u,v,c,w){const e=this.to.length;this.to.push(v,u);this.cap.push(c,0);this.cost.push(w,-w);this.nx.push(this.hd[u],this.hd[v]);this.hd[u]=e;this.hd[v]=e+1;return e};
+MCF.prototype.run=function(s,t){let f=0;const n=this.n;for(;;){const ds=new Float64Array(n).fill(Infinity),iq=new Uint8Array(n),pe=new Int32Array(n).fill(-1);ds[s]=0;const q=[s];iq[s]=1;
+for(let qi=0;qi<q.length;qi++){const u=q[qi];iq[u]=0;for(let e=this.hd[u];e>=0;e=this.nx[e]){const v=this.to[e];if(this.cap[e]>1e-9&&ds[u]+this.cost[e]<ds[v]-1e-12){ds[v]=ds[u]+this.cost[e];pe[v]=e;if(!iq[v]){iq[v]=1;q.push(v)}}}}
+if(pe[t]<0)return f;let b=Infinity;for(let v=t;v!==s;v=this.to[pe[v]^1])b=Math.min(b,this.cap[pe[v]]);for(let v=t;v!==s;v=this.to[pe[v]^1]){this.cap[pe[v]]-=b;this.cap[pe[v]^1]+=b}f+=b}};
+function solve(p){const wc={};W.forEach(i=>wc[i]=p.wcap);
+const R={asg:[[],[]],uc:[[],[]],km:[[],[]],o:0,i:0,h:0,thru:N.map(()=>0),unmet:0},nd=DS.length;
+[1,0].forEach(g=>{const pl=P.filter(i=>N[i].g===g);let id=2;const pid={},wi={},wo={},di=[];
+pl.forEach(i=>pid[i]=id++);W.forEach(i=>{wi[i]=id++;wo[i]=id++});for(let d=0;d<nd;d++)di[d]=id++;
+const G=new MCF(id),eP=[],eI=[],eW=[];let tot=0;pl.forEach(i=>G.add(0,pid[i],p.pcap,0));
+for(let d=0;d<nd;d++){const q=DS[d][3+g];if(q){tot+=q;G.add(di[d],1,q,0)}}
+pl.forEach(i=>{for(let d=0;d<nd;d++)if(DS[d][3+g])eP.push([i,d,G.add(pid[i],di[d],1e12,p.out*ND[i][d])]);W.forEach(w=>eI.push([i,w,G.add(pid[i],wi[w],1e12,p.inb*NN[i][w])]))});
+W.forEach(w=>{G.add(wi[w],wo[w],wc[w],p.hand);for(let d=0;d<nd;d++)if(DS[d][3+g])eW.push([w,d,G.add(wo[w],di[d],1e12,p.out*ND[w][d])])});
+R.unmet+=tot-G.run(0,1);const fw=e=>G.cap[e^1],inF={},inC={},use={};
+eI.forEach(([i,w,e])=>{const f=fw(e);inF[w]=(inF[w]||0)+f;inC[w]=(inC[w]||0)+f*p.inb*NN[i][w];R.i+=f*p.inb*NN[i][w]});
+const A=[];for(let d=0;d<nd;d++)A[d]=[];
+eP.forEach(([i,d,e])=>{const f=fw(e);if(f>1e-6){A[d].push([i,f]);R.o+=f*p.out*ND[i][d]}});
+eW.forEach(([w,d,e])=>{const f=fw(e);if(f>1e-6){A[d].push([w,f]);R.o+=f*p.out*ND[w][d];R.h+=f*p.hand;use[w]=(use[w]||0)+f}});
+W.forEach(w=>wc[w]-=use[w]||0);
+for(let d=0;d<nd;d++){R.asg[g][d]=A[d];let q=0,c=0,k=0;A[d].forEach(([s,f])=>{q+=f;k+=f*ND[s][d];c+=f*(p.out*ND[s][d]+(N[s].t==='W'?p.hand+(inF[s]?inC[s]/inF[s]:0):0));R.thru[s]+=f});
+if(q){R.uc[g][d]=c/q;R.km[g][d]=k/q}}});return R}
+function asis(p,R){const L=[],o={o:0,i:0,h:0},thru=N.map(()=>0);let k=0,q=0;
+FL.forEach(([s,d,g,u])=>{const km=ND[s][d];let ic=0,hc=0;if(N[s].t==='W'){let m=1e9;P.forEach(pp=>{if(N[pp].g===g)m=Math.min(m,NN[pp][s])});ic=p.inb*m;hc=p.hand}
+o.o+=u*p.out*km;o.i+=u*ic;o.h+=u*hc;thru[s]+=u;k+=u*km;q+=u;const uc=p.out*km+ic+hc,ou=R.uc[g][d],ex=ou===undefined?0:uc-ou;
+L.push({s,d,g,u,km,uc,rk:R.km[g][d],ex:Math.max(0,ex)*u,fl:km>=p.thr&&ex>0.1*uc})});return{L,o,thru,km:k/q,q}}
+/*END*/
+const DEF={out:0.5,inb:0.3,hand:25,wcap:6e6,pcap:2e7,thr:300};
+const CT=[['out','Freight, delivery (per unit km)'],['inb','Freight, plant to warehouse (per unit km)'],['hand','Handling (per unit)'],['wcap','Warehouse capacity (units)'],['pcap','Plant capacity (units)'],['thr','Long haul threshold (km)']];
+const $=i=>document.getElementById(i),nf=(v,d=1)=>v>=1e9?(v/1e9).toFixed(2)+'B':v>=1e6?(v/1e6).toFixed(d)+'M':v>=1e3?(v/1e3).toFixed(0)+'K':Math.round(v)+'',cur=v=>'\u20A6'+nf(v,2);
+let P0={...DEF},mode='flag',S,A;
+$('ctl').innerHTML=CT.map(([k,l])=>`<label>${l}<input type="number" step="any" id="i_${k}" value="${DEF[k]}"></label>`).join('')+'<button id="rs">Reset</button>';
+let tm;CT.forEach(([k])=>$('i_'+k).oninput=e=>{const v=parseFloat(e.target.value);if(v>=0)P0[k]=v;clearTimeout(tm);tm=setTimeout(run,150)});
+$('rs').onclick=()=>{P0={...DEF};CT.forEach(([k])=>$('i_'+k).value=DEF[k]);run()};
+$('q').oninput=()=>tbl();
+$('mt').innerHTML=[['flag','Avoidable routes'],['opt','Recommended'],['cur','Current']].map(([m,l])=>`<button data-m="${m}">${l}</button>`).join('');
+$('mt').onclick=e=>{if(e.target.dataset.m){mode=e.target.dataset.m;drawMap()}};
+const X=lo=>30+(lo-2.4)/(14.8-2.4)*640,Y=la=>520-(la-4)/(14-4)*490,col=()=>getComputedStyle(document.body);
+const OUT=[[2.7,6.4],[2.75,7.8],[3.6,9.9],[3.6,11.7],[4.2,13.4],[5.3,13.8],[8.5,13.2],[11,13.4],[13.7,13.7],[14.6,13],[14.5,12],[13.5,10.8],[12.6,9],[11.4,7],[9.7,6.1],[8.9,4.8],[8.1,4.3],[6.9,4.3],[5.5,5],[4.4,6],[3.4,6.4]];
+function run(){S=solve(P0);A=asis(P0,S);const tot=A.q,sav=A.o.o+A.o.i+A.o.h-(S.o+S.i+S.h),ac=A.o.o+A.o.i+A.o.h,oc=S.o+S.i+S.h;
+const fl=A.L.filter(l=>l.fl),fu=fl.reduce((a,l)=>a+l.u,0),fe=fl.reduce((a,l)=>a+l.ex,0);let ok=0,oq=0;[0,1].forEach(g=>DS.forEach((d,i)=>(S.asg[g][i]||[]).forEach(([s,f])=>{ok+=f*ND[s][i];oq+=f})));
+$('sub').textContent=`${nf(tot)} units across ${DS.length} destinations, ${N.filter(n=>n.t==='P').length} plants and ${N.filter(n=>n.t==='W').length} warehouses, Jan to Apr 2026`;
+$('warn').style.display=S.unmet>1?'block':'none';$('warn').textContent=`Capacity too low: ${nf(S.unmet)} units cannot be served. Raise plant or warehouse capacity.`;
+const K=(l,v,s,c)=>`<div class="c"><div class="kl">${l}</div><div class="kv ${c||''}">${v}</div><div class="ks">${s}</div></div>`;
+$('kpi').innerHTML=K('Current cost',cur(ac),`${(ac/tot).toFixed(1)} per unit`)+K('Optimised cost',cur(oc),`${(oc/oq).toFixed(1)} per unit`)+K('Saving',cur(sav),`${(sav/ac*100).toFixed(1)}% of current cost`,'good')+K('Avoidable long routes',(fu/tot*100).toFixed(1)+'% of units',`${cur(fe)} extra cost, ${fl.length} lanes over ${P0.thr} km`,'bad');
+cost();dist(ok/oq);nodes();lanes(fl);tbl();drawMap()}
+function cost(){const c=col(),r=[['Current',A.o],['Optimised',{o:S.o,i:S.i,h:S.h}]],mx=Math.max(...r.map(([,v])=>v.o+v.i+v.h)),cs=[['o','Delivery freight','#2f6fb3'],['i','Plant to warehouse','#e8a33d'],['h','Handling','#7b6ad6']];let s='';
+r.forEach(([n,v],j)=>{let x=90;const y=14+j*54,t=v.o+v.i+v.h;s+=`<text x="0" y="${y+22}" font-size="12" fill="${c.getPropertyValue('--ink')}">${n}</text>`;
+cs.forEach(([k,,cc])=>{const w=v[k]/mx*340;s+=`<rect x="${x}" y="${y}" width="${w}" height="32" fill="${cc}" rx="2"/>`;x+=w});s+=`<text x="${x+6}" y="${y+21}" font-size="12" font-weight="600" fill="${c.getPropertyValue('--ink')}">${cur(t)}</text>`});
+cs.forEach(([,l,cc],i)=>s+=`<rect x="${90+i*140}" y="134" width="10" height="10" fill="${cc}" rx="2"/><text x="${105+i*140}" y="143" font-size="11" fill="${c.getPropertyValue('--mut')}">${l}</text>`);$('cost').innerHTML=s}
+function dist(okm){const c=col(),B=[100,250,500,800,1e9],lb=['0-100','100-250','250-500','500-800','800+'],a=B.map(()=>0),o=B.map(()=>0);
+A.L.forEach(l=>a[B.findIndex(b=>l.km<b)]+=l.u);[0,1].forEach(g=>DS.forEach((d,i)=>(S.asg[g][i]||[]).forEach(([s,f])=>o[B.findIndex(b=>ND[s][i]<b)]+=f)));
+const ta=a.reduce((x,y)=>x+y),to=o.reduce((x,y)=>x+y),mx=Math.max(...a.map(v=>v/ta),...o.map(v=>v/to));let s='';
+lb.forEach((l,i)=>{const x=20+i*100,h1=a[i]/ta/mx*130,h2=o[i]/to/mx*130;s+=`<rect x="${x}" y="${160-h1}" width="34" height="${h1}" fill="var(--as)" rx="2"/><rect x="${x+38}" y="${160-h2}" width="34" height="${h2}" fill="var(--op)" rx="2"/>
+<text x="${x+36}" y="178" text-anchor="middle" font-size="11" fill="${c.getPropertyValue('--mut')}">${l} km</text><text x="${x+17}" y="${154-h1}" text-anchor="middle" font-size="10" fill="${c.getPropertyValue('--mut')}">${(a[i]/ta*100).toFixed(0)}%</text><text x="${x+55}" y="${154-h2}" text-anchor="middle" font-size="10" fill="${c.getPropertyValue('--mut')}">${(o[i]/to*100).toFixed(0)}%</text>`});
+s+=`<text x="0" y="205" font-size="11" fill="${c.getPropertyValue('--mut')}">Average delivery leg: ${A.km.toFixed(0)} km current, ${okm.toFixed(0)} km optimised</text>`;$('dist').innerHTML=s}
+function nodes(){const c=col(),mx=Math.max(...N.map((n,i)=>Math.max(A.thru[i],S.thru[i])),P0.wcap),rw=32;let s='';
+N.forEach((n,i)=>{const y=6+i*rw,wa=A.thru[i]/mx*330,wo=S.thru[i]/mx*330;s+=`<text x="0" y="${y+17}" font-size="12" fill="${c.getPropertyValue('--ink')}">${n.n}${n.t==='P'?' (plant)':''}</text><rect x="110" y="${y}" width="${wa}" height="11" fill="var(--as)" rx="2"/><rect x="110" y="${y+13}" width="${wo}" height="11" fill="var(--op)" rx="2"/><text x="${115+Math.max(wa,wo)}" y="${y+16}" font-size="11" fill="${c.getPropertyValue('--mut')}">${nf(A.thru[i])} to ${nf(S.thru[i])}</text>`;
+if(n.t==='W'){const x=110+P0.wcap/mx*330;s+=`<line x1="${x}" x2="${x}" y1="${y-2}" y2="${y+26}" stroke="${c.getPropertyValue('--rd')}" stroke-width="1.5"/>`}});$('node').innerHTML=s}
+function lanes(fl){fl.sort((a,b)=>b.ex-a.ex);$('lanes').innerHTML='<tr><th>Served from</th><th>Destination</th><th class="n">Units</th><th class="n">Km</th><th class="n">Best km</th><th class="n">Extra cost</th></tr>'+(fl.slice(0,14).map(l=>`<tr class="f"><td>${N[l.s].n}</td><td>${DS[l.d][0]}</td><td class="n">${nf(l.u)}</td><td class="n">${l.km.toFixed(0)}</td><td class="n">${l.rk===undefined?'-':l.rk.toFixed(0)}</td><td class="n">${cur(l.ex)}</td></tr>`).join('')||'<tr><td colspan="6">No lanes flagged</td></tr>')}
+function mix(m,t){const e=Object.entries(m).sort((a,b)=>b[1]-a[1]);return e.slice(0,2).map(([k,v])=>`${N[k].n} ${Math.round(v/t*100)}%`).join(', ')+(e.length>2?` +${e.length-2}`:'')}
+function tbl(){const R={};A.L.forEach(l=>{const r=R[l.d]||(R[l.d]={u:0,c:0,k:0,m:{},f:0,oc:0,ok:0,om:{}});r.u+=l.u;r.c+=l.u*l.uc;r.k+=l.u*l.km;r.m[l.s]=(r.m[l.s]||0)+l.u;if(l.fl)r.f=1});
+[0,1].forEach(g=>DS.forEach((d,i)=>(S.asg[g][i]||[]).forEach(([s,f])=>{const r=R[i];if(!r)return;r.oc+=f*S.uc[g][i];r.ok+=f*ND[s][i];r.om[s]=(r.om[s]||0)+f})));
+const q=$('q').value.toLowerCase(),rows=Object.entries(R).filter(([i])=>DS[i][0].toLowerCase().includes(q)).sort((a,b)=>b[1].u-a[1].u).slice(0,12);
+$('dst').innerHTML='<tr><th>Destination</th><th class="n">Units</th><th>Served from now</th><th>Recommended</th><th class="n">Km now</th><th class="n">Km new</th><th class="n">Saving</th></tr>'+rows.map(([i,r])=>{const ou=Object.values(r.om).reduce((a,b)=>a+b,0)||1;return`<tr class="${r.f?'f':''}"><td>${DS[i][0]} ${r.f?'<span class="tag">long route</span>':''}</td><td class="n">${nf(r.u)}</td><td>${mix(r.m,r.u)}</td><td>${mix(r.om,ou)}</td><td class="n">${(r.k/r.u).toFixed(0)}</td><td class="n">${(r.ok/ou).toFixed(0)}</td><td class="n">${cur(r.c-r.oc)}</td></tr>`}).join('')}
+function drawMap(){const c=col();document.querySelectorAll('#mt button').forEach(b=>b.className=b.dataset.m===mode?'on':'');
+let s=`<polygon points="${OUT.map(([x,y])=>X(x)+','+Y(y)).join(' ')}" fill="${c.getPropertyValue('--bg')}" stroke="${c.getPropertyValue('--line')}" stroke-width="1.5"/>`;
+DS.forEach(d=>{const u=d[3]+d[4];s+=`<circle cx="${X(d[2])}" cy="${Y(d[1])}" r="${1.5+Math.sqrt(u)/450}" fill="${c.getPropertyValue('--mut')}" opacity=".35"/>`});
+let ln=[];if(mode==='flag')A.L.filter(l=>l.fl).sort((a,b)=>b.ex-a.ex).slice(0,120).forEach(l=>ln.push([l.s,l.d,l.u,'#e0483e']));
+else if(mode==='opt'){[0,1].forEach(g=>DS.forEach((d,i)=>(S.asg[g][i]||[]).forEach(([s,f])=>ln.push([s,i,f,'#0f9d8a']))));ln=ln.sort((a,b)=>b[2]-a[2]).slice(0,260)}
+else ln=A.L.slice().sort((a,b)=>b.u-a.u).slice(0,260).map(l=>[l.s,l.d,l.u,'#8da2b8']);
+ln.forEach(([a,b,u,cc])=>s+=`<line x1="${X(N[a].lo)}" y1="${Y(N[a].la)}" x2="${X(DS[b][2])}" y2="${Y(DS[b][1])}" stroke="${cc}" stroke-width="${Math.min(4,.4+Math.sqrt(u)/260)}" opacity=".6"/>`);
+N.forEach(n=>{const x=X(n.lo),y=Y(n.la),k=c.getPropertyValue('--ink');s+=(n.t==='P'?`<rect x="${x-6}" y="${y-6}" width="12" height="12" fill="${k}"/>`:`<circle cx="${x}" cy="${y}" r="6" fill="${k}" stroke="${c.getPropertyValue('--card')}" stroke-width="1.5"/>`)+`<text x="${x+9}" y="${y+4}" font-size="11" font-weight="600" fill="${k}" stroke="${c.getPropertyValue('--card')}" stroke-width="3" paint-order="stroke">${n.n}</text>`});$('map').innerHTML=s}
+if(typeof document!=='undefined'&&document.getElementById&&!window.__test)run();
+</script></body></html>
